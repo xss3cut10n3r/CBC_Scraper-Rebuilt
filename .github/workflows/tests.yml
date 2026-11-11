@@ -9,7 +9,8 @@ permissions:
 
 jobs:
   unit-tests:
-    runs-on: ubuntu-latest
+    # ubuntu-latest is 26.04, and that image has no Python 3.9 build.
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python-version: ['3.9', '3.13']
