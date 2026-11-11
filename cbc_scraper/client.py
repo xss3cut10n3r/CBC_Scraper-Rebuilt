@@ -25,7 +25,8 @@ def request_headers(text):
         )
     if text.lower().startswith("cookie:"):
         return {"cookie": text.split(":", 1)[1].strip()}
-    tokens = shlex.split(text.replace("\\\n", " "))
+    # Copied commands are parsed, never executed. Firefox has two copy formats.
+    tokens = _curl_tokens(text)
     headers = {}
     for token_index, token in enumerate(tokens[:-1]):
         if token in ("-H", "--header"):
@@ -37,6 +38,166 @@ def request_headers(text):
     if not headers:
         raise ScraperError("Request file contains no supported cookie or CSRF header.")
     return headers
+
+
+def _curl_tokens(text):
+    """Split Copy as cURL (Windows) or Copy as cURL (POSIX) into arguments."""
+    if _has_windows_quote(text):
+        return _windows_curl_tokens(text)
+    return _posix_curl_tokens(text)
+
+
+def _has_windows_quote(text):
+    # ^" is cmd's escaped quote. The same two characters can appear inside a POSIX value.
+    index = 0
+    length = len(text)
+    while index < length:
+        if text.startswith("$'", index):
+            index = _skip_ansi_c_quotes(text, index)
+            continue
+        if text[index] in "\"'":
+            index = _skip_posix_quotes(text, index)
+            continue
+        if text.startswith('^"', index):
+            return True
+        index += 1
+    return False
+
+
+def _skip_ansi_c_quotes(text, index):
+    index += 2
+    length = len(text)
+    while index < length:
+        if text.startswith("\\'", index) or text.startswith("\\\\", index):
+            index += 2
+            continue
+        if text[index] == "'":
+            return index + 1
+        index += 1
+    return length
+
+
+def _skip_posix_quotes(text, index):
+    quote = text[index]
+    index += 1
+    length = len(text)
+    while index < length and text[index] != quote:
+        if quote == '"' and text[index] == "\\" and index + 1 < length:
+            index += 2
+            continue
+        index += 1
+    return index + 1
+
+
+def _posix_curl_tokens(text):
+    # $'...' is bash ANSI-C quoting. Firefox uses it when a value contains ! or '.
+    text = re.sub(
+        r"\$'((?:\\'|[^'])*)'",
+        lambda match: _shlex_quote(_decode_ansi_c(match.group(1))),
+        text,
+    )
+    return shlex.split(text.replace("\\\n", " "))
+
+
+def _shlex_quote(value):
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _decode_ansi_c(body):
+    characters = []
+    index = 0
+    length = len(body)
+    while index < length:
+        if body[index] != "\\":
+            characters.append(body[index])
+            index += 1
+            continue
+        if index + 1 >= length:
+            raise ValueError("Truncated ANSI-C escape in cURL command.")
+        escape = body[index + 1]
+        if escape in "\\'":
+            characters.append(escape)
+            index += 2
+        elif escape == "n":
+            characters.append("\n")
+            index += 2
+        elif escape == "r":
+            characters.append("\r")
+            index += 2
+        elif escape == "x" and index + 3 < length:
+            characters.append(chr(int(body[index + 2 : index + 4], 16)))
+            index += 4
+        elif escape == "u" and index + 5 < length:
+            characters.append(chr(int(body[index + 2 : index + 6], 16)))
+            index += 6
+        elif escape in "01234567":
+            digits = escape
+            index += 2
+            while index < length and len(digits) < 3 and body[index] in "01234567":
+                digits += body[index]
+                index += 1
+            characters.append(chr(int(digits, 8)))
+        else:
+            characters.append(escape)
+            index += 2
+    return "".join(characters)
+
+
+def _windows_curl_tokens(text):
+    # Firefox wraps each argument in ^"..."^" and continues lines with ^.
+    tokens = []
+    index = 0
+    length = len(text)
+    while index < length:
+        while index < length and text[index] in " \t\n":
+            index += 1
+        if index >= length:
+            break
+        if text[index] == "^" and (index + 1 == length or text[index + 1] == "\n"):
+            index += 1
+            if index < length and text[index] == "\n":
+                index += 1
+            continue
+        if text.startswith('^"', index):
+            token, index = _read_windows_quoted(text, index)
+            tokens.append(token)
+            continue
+        start = index
+        while index < length and text[index] not in " \t\n":
+            index += 1
+        tokens.append(text[start:index])
+    return tokens
+
+
+def _read_windows_quoted(text, index):
+    # Undo cmd caret escapes, then the backslash escapes Firefox applies first.
+    index += 2
+    characters = []
+    length = len(text)
+    while index < length:
+        if text.startswith('^\\^"', index):
+            characters.append('"')
+            index += 4
+            continue
+        if text.startswith("^\\^\\", index):
+            characters.append("\\")
+            index += 4
+            continue
+        if text.startswith('^"', index):
+            return "".join(characters), index + 2
+        if text[index] == "^" and index + 1 < length:
+            if text[index + 1] == "\n":
+                characters.append("\n")
+                index += 2
+                if index < length and text[index] == "\n":
+                    index += 1
+                continue
+            characters.append(text[index + 1])
+            index += 2
+            continue
+        characters.append(text[index])
+        index += 1
+    raise ValueError("Unclosed Windows cURL quote.")
 
 
 class Client:

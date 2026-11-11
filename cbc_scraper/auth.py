@@ -48,7 +48,7 @@ REQUEST_TEMPLATE = """# CBC Scraper browser login
 # 6. Run cbc-scraper. It finds this file automatically.
 #
 # Alternative: delete the Cookie line and paste the entire request using
-# Network > right-click the request > Copy > Copy as cURL (bash).
+# Network > right-click the request > Copy > Copy as cURL (Windows) or Copy as cURL (POSIX).
 # Keep the comments; copied commands are parsed, never executed.
 #
 # This file contains your login. Keep it private. It is ignored by Git.

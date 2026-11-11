@@ -24,6 +24,14 @@ from .stats import leaderboard, submissions
 from .banner import print_banner
 
 
+def request_path(source):
+    # input() keeps quotes typed around a path. A shell would have removed them.
+    source = source.strip()
+    if len(source) >= 2 and source[0] == source[-1] and source[0] in "\"'":
+        return source[1:-1].strip()
+    return source
+
+
 def save(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -239,7 +247,7 @@ def create_request_template(console):
     instructions = (
         "1. Log in at https://nsa-codebreaker.org in your browser.\n\n"
         "2. Open Developer Tools → Network, then reload the page.\n\n"
-        "3. Right-click a request to nsa-codebreaker.org → Copy as cURL.\n\n"
+        "3. Right-click a request to nsa-codebreaker.org → Copy as cURL (Windows) or Copy as cURL (POSIX).\n\n"
         "4. Paste it into [bold]edit_this_request.txt[/bold], replacing the Cookie line, and save it."
     )
     console.print()
@@ -265,7 +273,7 @@ def setup(args):
     console.print(
         "1. Log in at https://nsa-codebreaker.org in your browser.\n"
         "2. Open Developer Tools → Network, then reload the page.\n"
-        "3. Right-click a request to nsa-codebreaker.org → Copy as cURL.\n"
+        "3. Right-click a request to nsa-codebreaker.org → Copy as cURL (Windows) or Copy as cURL (POSIX).\n"
         "4. Paste it into a text file and save it."
     )
     source = args.request_file
@@ -276,17 +284,25 @@ def setup(args):
             )
         source = input(
             "Path to that file, or type template for a cookie paste guide (Enter to cancel): "
-        ).strip()
-        if source.lower() == "template":
+        )
+        if source.strip().lower() == "template":
             return create_request_template(console)
-        if not source:
+        if not source.strip():
             return 0
+    source = request_path(source)
+    if not source:
+        return 0
     try:
         text = Path(source).expanduser().read_text()
-        headers = request_headers(text)
-    except (OSError, ValueError):
+    except OSError:
         raise ScraperError(
-            "Could not read that browser request. Check the file path and copy it as cURL."
+            "Could not open that file. Check the path. Quotes around it are optional."
+        ) from None
+    try:
+        headers = request_headers(text)
+    except ValueError:
+        raise ScraperError(
+            "Could not read that browser request. Copy it as cURL (Windows) or cURL (POSIX) and save it as plain text."
         ) from None
     if not headers.get("cookie"):
         raise ScraperError(

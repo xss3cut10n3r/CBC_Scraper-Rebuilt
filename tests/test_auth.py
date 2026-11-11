@@ -55,6 +55,24 @@ class AuthTests(unittest.TestCase):
             ):
                 self.assertEqual(find_request(data_dir=data), target)
 
+    def test_setup_prompt_accepts_quoted_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "browser.txt"
+            source.write_text(
+                "curl https://nsa-codebreaker.org -H 'Cookie: cbweb_session=fake'"
+            )
+            data = Path(directory) / "data"
+            previous_directory = Path.cwd()
+            try:
+                os.chdir(directory)
+                with patch("sys.stdin.isatty", return_value=True), patch(
+                    "builtins.input", return_value=f'"{source}"'
+                ):
+                    self.assertEqual(main(["setup", "--data-dir", str(data)]), 0)
+            finally:
+                os.chdir(previous_directory)
+            self.assertEqual((data / "request.txt").read_text(), source.read_text())
+
     def test_missing_login_has_actionable_instructions(self):
         with patch.dict(os.environ, {}, clear=True), patch(
             "cbc_scraper.auth.Path.is_file", return_value=False
